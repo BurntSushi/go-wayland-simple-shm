@@ -1,4 +1,20 @@
-[andrew@Ocelot go-wayland-simple-shm] go build
-# github.com/BurntSushi/go-wayland-simple-shm
-Go type not supported in export: [0]byte
-Go type not supported in export: [0]byte
+An attempt at porting the "simple-shm" demo client in the wayland-demos 
+repository to Go. Currently, it does paint to the screen, but only does it 
+once.
+
+This is some of the worst code I've ever written and is strictly meant as a 
+"Hey it can be done" sort of thing.
+
+So far, while this is working, I still considered it a failed experiment. 
+Primarily because the Wayland libraries use C function pointers gratuitously, 
+and cgo cannot deal with these elegantly.
+
+Moreover, all of the "callback" functions (prefixed with "go...") must be 
+exported, and for whatever reason, the Wayland structs are not being properly 
+translated to Go types. Thus, the callback functions must be stripped of all 
+struct parameters, and data must be passed using unsafe.Pointer. Not pretty.
+
+Please see 
+https://groups.google.com/group/golang-nuts/browse_thread/thread/21839cae97586b79
+for a more in depth description of the exporting problem.
+
