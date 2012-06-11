@@ -1,0 +1,4 @@
+[andrew@Ocelot go-wayland-simple-shm] go build
+# github.com/BurntSushi/go-wayland-simple-shm
+Go type not supported in export: [0]byte
+Go type not supported in export: [0]byte
