@@ -18,3 +18,16 @@ Please see
 https://groups.google.com/group/golang-nuts/browse_thread/thread/21839cae97586b79
 for a more in depth description of the exporting problem.
 
+Install
+=======
+This package is indeed Go gettable, but for it to do anything meaningful, 
+you'll need to have a Wayland compositor running. (This has only been tested 
+with the reference compositor, Weston.)
+
+Run Weston (under X11 is fine) and then run 
+$GOPATH/bin/go-wayland-simple-shm from a terminal.
+
+Build instructions for Wayland can be found here: 
+http://wayland.freedesktop.org/building.html -- If you're lucky, your Linux 
+distribution has packaged it for you.
+
