@@ -1,0 +1,285 @@
+What follows is a conversation between pq and burntsushi (I'm burntsushi). In 
+it, we discuss the possibility of writing a pure Go Wayland client library.
+
+In the end, I decided to proceed with wrapping EGL and libwayland-client, 
+primarily because it's the easiest path and it will increase my understanding. 
+Hopefully it will increase it enough to make writing a pure Go implementation 
+feasible for me.
+
+================================================================================
+
+[02:23] <pq> burntsushi, if by "fast rendering" you mean "GPU rendering", then 
+EGL is practically the only way. But if you render with CPU, then "fast" would 
+be the shm buffer interface, which does not need EGL.
+[02:24] <pq> burntsushi, also, EGL using libwayland-client should not be a 
+problem at all, because both your Go interpreter(?) and EGL will load the same 
+libwayland-client.
+[02:25] --> giselher has joined this channel (~giselher@193.170.133.156).
+[02:27] --> jpetersen has joined this channel 
+(~jpetersen@g229109116.adsl.alicedsl.de).
+[02:27] <pq> burntsushi, problems arise if there are threads involved, and 
+things get fairly impossible if the EGL calls happen in a different process 
+that the other wayland talking for the same app.
+[02:28] --> voidcoder has joined this channel 
+(~androirc@82-171-102-39.ip.telfort.nl).
+[02:28] <pq> *different process than
+[02:31] <burntsushi> pq: EGL linking to libwayland-client isn't a problem *if* 
+i wrap libwayland-client. what i'd *like* to do is write a pure Go 
+implementation
+[02:31] --> zyga has joined this channel (~zyga@linaro/zyga).
+[02:31] <pq> burntsushi, then you're doomed.
+[02:32] --> cavalier_work has joined this channel 
+(~cavalier@ip4daa055d.direct-adsl.nl).
+[02:32] <burntsushi> i guess i just wanted to make sure i explored all 
+(reasonable) possibilities before i proceed with wrapping. Go's C wrapping is a 
+bit immature, and it's going to be a pain
+[02:33] <burntsushi> pq: what did you mean about threads and EGL? does that 
+essentially come down to forcing all Go calls to libwayland-client to happen in 
+one thread?
+[02:34] <burntsushi> (when I say Go's C wrapping is immature, i mean that 
+translating between C function pointers and Go function pointers requires some 
+tedious indirection)
+[02:34] <pq> burntsushi, yes, all calls from a single thread has so far been 
+the rule.
+[02:35] <burntsushi> conveniently, i need to impose that requirement anyway 
+(namely, C can't call Go functions in another thread)
+[02:35] <pq> or, you get to do the locking yourself, and that will be hard with 
+callbacks, and extremely hard with the current libEGL
+[02:35] --> Siekacz has joined this channel 
+(~Siekacz@apn-46-76-206-66.dynamic.gprs.plus.pl).
+[02:36] <burntsushi> what is the specific reason that EGL requires everything 
+in the same thread?
+[02:37] <pq> the little implementation detail that needs some fixing: libEGL 
+may dispatch any incoming events, when it really should not. It's been 
+discussed, but I don't think any fixes have landed.
+[02:38] --> thiago has joined this channel (~thiago@kde/thiago).
+[02:39] <burntsushi> i suppose if i wanted to be unreasonable, the only way to 
+get pure Go would be to rewrite EGL in pure Go, right?
+[02:39] <pq> EGL by specification requires the opposite, to my knowledge: that 
+threading should work, given some context binding sanity
+[02:40] <pq> yeah
+[02:41] <pq> or an EGL wrapper library, that intercepts anything Wayland 
+related, and directs it to your Go implementation
+[02:42] <pq> so yeah, lots of fuss
+[02:42] <burntsushi> interesting... hmm. that may not be so unreasonable, since 
+an EGL wrapper library will have to be created one way or another
+[02:42] <pq> it does?
+[02:43] <burntsushi> well, if one were to hypothetically use EGL with a Go 
+client library (whether the client lib is a wrapper or not), you'd have to wrap 
+EGL to call EGL functions
+[02:43] <pq> wait, you don't even have EGL in Go yet?
+[02:44] <burntsushi> nope. it's all uphill. :-( we have regular open gl, and 
+that's it
+[02:44] <-- giselher has left this server (Read error: Operation timed out).
+[02:44] <burntsushi> (the other problem is i know nothing about open gl and 
+egl)
+[02:44] <pq> oh, you made the glX interface instead?
+[02:45] <pq> or you have some even higher level API?
+[02:45] <burntsushi> i might actually have that (by virtual of the X go 
+binding?), but for my purposes in the immediate future, i was just going to 
+test stuff with shm. but i wanted to make sure EGL support was possible in the 
+future.
+[02:45] --> anderco has joined this channel 
+(ander@nat/intel/x-digslrhkunwlauoe).
+[02:46] <burntsushi> (i'm thinking that "glx" is simply the implementation of 
+the X GLX extension, if so, then i have that)
+[02:46] --> olesalscheider has joined this channel 
+(~olesalsch@2001:4dd0:ff00:835c:6ef0:49ff:fe02:25e3).
+[02:47] <pq> yeah, I was thinking of all the glX* C API
+[02:47] <burntsushi> is it part of Xlib or XCB?
+[02:48] <burntsushi> if so, then yeah, i have a pure Go implementation of that 
+(generated from the protocol XML description of the glx extension)
+[02:48] <pq> htye're in libGL.so
+[02:50] <pq> well, if you can use GL, and you can run Go GL apps on X, then you 
+must have either EGL or glX under the hood. I just don't know if that is 
+exposed directly in your API, or whether you have something higher-level.
+[02:51] <burntsushi> i haven't used or tested my glX extension yet. the open gl 
+wrapper that exists in Go wraps libGL and can display X windows. (however, this 
+part doesn't use X Go binding, but whatever open gl uses... probably Xlib/xcb)
+[02:51] <burntsushi> can i do anything useful with a wrapped open gl in wayland 
+without egl?
+[02:51] <pq> openGL does not use anything, when it comes to windowing system.
+[02:52] <pq> there must EGL, glX, wgl, agl, whatever to glue GL to the 
+windowing system
+[02:52] <burntsushi> yup, you're right. the open gl go wrapper is using Xlib 
+and glX
+[02:53] <pq> burntsushi, well, I don't know if it is useful, but if you can get 
+an FBO, you could render with GPU, read the image into an shm buffer, and send 
+it via Wayland. Which is a bit stupid, since the Wayland server will only 
+upload the image to GPU again.
+[02:54] <burntsushi> yeah, i don't want to be stupid.
+[02:54] <burntsushi> i'm starting to like your suggestion of wrapping EGL, but 
+redirecting all wayland calls to a pure Go wayland client library...
+[02:55] <burntsushi> that kind of sounds like the right approach from where i'm 
+standing. a lot more work, but not too unreasonable, i don't think. (but then 
+again, i don't know what's waiting for me inside egl...)
+[02:57] <pq> burntsushi, that approach is pretty much the same as what I need 
+to do when I want to have native Wayland GL clients on Android. Except Android 
+already has an EGL-wrapper to begin with, and it's C++.
+[02:58] <burntsushi> lucky
+[02:58] <burntsushi> :P
+[02:58] --> brendand has joined this channel 
+(~brendand@94-192-232-102.zone6.bethere.co.uk).
+[02:58] <burntsushi> i'm kind of hoping i can look at Go's open gl wrapper and 
+follow its lead.
+[02:58] <pq> i.e. you are basically implementing the EGL Wayland platform on 
+top of another libEGL
+[03:00] <burntsushi> i haven't looked inside egl yet. how much wayland specific 
+code is in there that would need to be reimplemented? is it all collected in 
+one place?
+[03:00] <pq> and you'd better hope the libEGL you are wrapping can get you a 
+display and a context without a real window.
+[03:00] <pq> burntsushi, you can look at the architecture page in the wayland 
+website
+[03:00] <burntsushi> why wouldn't it be able to do that if i'm wrapping the 
+same libEGL that wayland uses?
+[03:01] <pq> burntsushi, now you are mixing terms. Wayland never uses a libEGL. 
+Did you mean Weston?
+[03:01] <burntsushi> errm yes, or a demo client
+[03:02] <burntsushi> (i am worrying about clients now, i'll worry about 
+compositors later...)
+[03:02] --> vapula has joined this channel 
+(~rolland@AMontsouris-158-1-55-188.w92-128.abo.wanadoo.fr).
+[03:02] <pq> well, the libEGL demo clients use already supports Wayland: 
+windowing system is Wayland, and the display is a wl_display, i.e. you need a 
+connection to a Wayland server.
+[03:03] <pq> Weston's DRM backend also uses libEGL, and there the windowing 
+system is GBM, or in other words, the DRM and framebuffer
+[03:03] <pq> what *you* want, is a null windowing system, no real windows or 
+outputs
+[03:03] <pq> luckily, I think Mesa has that
+[03:04] <burntsushi> hmmm. why can't i replicate what weston/demo clients are 
+doing? i obviously couldn't use wl_display, but i'd need to use its analogous 
+Go type.
+[03:05] <pq> burntsushi, because you are *reimplementing* what the demo clients 
+use. The libEGL the demo clients use, uses libwayland-client to implement the 
+EGL Wayland platform.
+[03:06] <pq> you cannot make new Wayland connection just for the EGL, it needs 
+to be the same as your Go app.
+[03:07] <burntsushi> right, i get that. that's what i was thinking; so i'd take 
+the same approach as how libwayland-client and EGL interact, but use my own Go 
+types instead
+[03:07] <pq> yeah, and call the Go routines to go with it
+[03:08] <burntsushi> correct
+[03:08] <burntsushi> so all i need to do is provide wl_egl_window_create, 
+wl_egl_window_resize, etc.? (i.e., write those in pure Go using Go types 
+instead of wl_surface for example)
+[03:09] <pq> ..and all EGL API that deals with EGLNative* types or types 
+directly derived from them
+[03:09] <burntsushi> ah, riht
+[03:09] <burntsushi> right*
+[03:09] <jadahl> min2_: what crashes?
+[03:10] <burntsushi> right right, because EGLNative is type def'd to some 
+wayland types
+[03:11] <pq> burntsushi, that's not the real reason. The real reason is, that 
+when an EGL function is called with the generic EGLDisplay or EGLSurface 
+arguments, you have to divert that call into your own Go-stuff, if that object 
+was created from your Go-type.
+[03:11] <pq> or EGLPixmap or...
+[03:11] <burntsushi> correct. but i mean, the real reason why that needs 
+diversion is that those types end up needing to be Go wayland client types
+[03:12] <burntsushi> but yeah, i get that
+[03:12] <pq> not the types, but the implementation of the entry points
+[03:12] <pq> the native types are usually just whatever pointers in pratice
+[03:12] --> oy has joined this channel (~kuwe@f055063073.adsl.alicedsl.de).
+[03:13] <burntsushi> right
+[03:14] <pq> if you look at the wl_egl_* API implementation, you see it's a 
+trivial thin wrapper. All the work is in EGL functions.
+[03:14] <burntsushi> yeah i saw that; i was excited when i saw that. i forgot 
+about the Native type stuff.
+[03:15] <pq> I have looked into implementing Wayland platform in a wrapper-EGL 
+library, but I haven't really started it yet, and will be some time before I 
+do, so I cannot give exact advice yet
+[03:15] <-- diegoviola has left this server (Ping timeout: 244 seconds).
+[03:16] <burntsushi> and that would basically abstract the wayland parts of EGL 
+so that there is one easy entry point?
+[03:17] <pq> burntsushi, but I guess there is a shortcut in your case. You 
+might be able to take Mesa's Wayland platform implementation, and convert all 
+libwayland-client calls into calls to your Go-lib.
+[03:17] <pq> maybe that was what you were thinking?
+[03:18] <pq> I only just realised
+[03:18] <burntsushi> yes :-)
+[03:19] --> raster has joined this channel (raster@enlightenment1.osuosl.org).
+[03:19] <-- raster has left this server (Changing host).
+[03:19] --> raster has joined this channel 
+(raster@enlightenment/developer/raster).
+[03:19] <pq> you just need a way to detect a Go-native-display apart from all 
+the other native display types Mesa supports and you could add a Wayland-Go 
+platform... in theory
+[03:20] <pq> but this won't save you from creating a Go interface to all of EGL
+[03:21] <pq> it's just more indirection
+[03:21] <burntsushi> yeah, i'm looking at the native display code right now. i 
+think the idea is that *any* function that uses 
+EGLNative{DisplayType,PixmapType,WindowType} has to be re-written in Go. i 
+think that absolves me from actually adding any types to mesa itself
+[03:21] <burntsushi> yeah, i think i can manage wrapping all of EGL. a major 
+PITA, but doable.
+[03:22] <pq> burntsushi, not only those. Grep Mesa for 'wl_', those are what 
+you need to replace.
+[03:22] <pq> no, not only EGLNative, but others, too
+[03:22] <pq> *so
+[03:22] <burntsushi> ick
+[03:23] <burntsushi> when you say "mesa" do you just mean mesa/egl?
+[03:23] <pq> yeah, I couldn't recall the exact path
+[03:23] <burntsushi> all right (i only ask because the "mesa" repo includes a 
+lot of stuff, that i'm hoping i don't have to touch)
+[03:24] <pq> actually the dir is src/egl
+[03:24] <burntsushi> right
+[03:24] <pq> well, all calls into libwayland-client
+[03:25] <pq> that's simple, really: you want to get rid of libwayland-client => 
+you need to replace all libwaylabd-client calls and types.
+[03:25] <burntsushi> ug, gallium looks into libwayland-client
+[03:25] <pq> really?
+[03:25] <burntsushi> gallium/state_trackers/egl/wayland/native_{drm,shm}.c
+[03:26] <burntsushi> and gallium/winsys/sw/wayland/wayland_sw_winsys.c
+[03:26] <burntsushi> ach, egl/drivers/dri2 does too, but that's part of egl 
+anyway
+[03:27] <burntsushi> i think you're right, it is an easy concept. i just really 
+need to spend some time understanding egl and how it works.
+[03:27] <pq> yeah, I haven't noticed those parts before
+[03:28] <pq> then again, the libEGLs I'm wrapping are closed source
+[03:28] <burntsushi> the android libegls?
+[03:28] <pq> and I won't have their source, either
+[03:28] <pq> the EGL libs from Android hardware vendors
+[03:28] <burntsushi> how in the world can you wrap something without knowing 
+the source?
+[03:28] <burntsushi> ah, yikes
+[03:29] <burntsushi> ah, well, i guess if you know the API they are supposed to 
+conform to...
+[03:29] <pq> the API is already specified, and Android specifies a little more 
+to make the Android OS to work.
+[03:29] <pq> so yeah, I just wish they honoured the spec
+[03:30] <pq> (queue for LOL)
+[03:30] <burntsushi> that must be hell. so do you need to have various tweaks 
+for each hardware vendor?
+[03:30] <burntsushi> lol is right
+[03:31] <pq> I don't know yet, I have only one device, and I haven't started 
+the hard EGL work yet
+[03:31] <pq> if I can stick to features Android already uses, I should be fine. 
+Can I, that's another question.
+[03:32] <burntsushi> interesting. is there interest in using wayland for 
+android display? (thus allowing for programs to work on a linux desktop and an 
+android device?)
+[03:33] <pq> I'm going to do input for the weston backend first, and some other 
+stuff before that
+[03:33] <-- thiago has left this server (Ping timeout: 245 seconds).
+[03:33] <pq> burntsushi, we hope to create such, if there isn't
+[03:33] <burntsushi> that would be pretty dang sweet
+[03:34] <pq> and by "we" I mean Collabora, who I work for
+[03:35] <burntsushi> ah very nice. that's a really cool job. must be amazing!
+[03:36] <-- Siekacz has left this server (Ping timeout: 244 seconds).
+[03:37] <burntsushi> hmm, EGL's internal _egl_display type has a void* to the 
+"display" type of whatever platform is being used. so any place that's used, 
+i'd have to rewrite in Go too
+[03:40] <burntsushi> after all this, i think i am going to push forward and 
+wrap libwayland-client, then wrap libegl. and get those two things working. 
+(the easiest path, and something i know how to do.) then i'll come back around 
+and make them pure Go. by that point, i'll hopefully understand things enough 
+to be more capable.
+[03:40] <burntsushi> plus, wrapping libegl won't be for naught. i'll need to 
+work from that anyway.
+[03:41] --> MeanEYE has joined this channel (~meaneye@109.94.96.2).
+[03:43] <burntsushi> anyway, i'm off to bed. thank you so much for taking the 
+time to answer my questions; you've *really* helped a lot of ideas crystallize 
+in my head. i really appreciate it!
+
